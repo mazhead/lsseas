@@ -13,6 +13,11 @@
 #
 # uncomment to debug
 # set -x
+# Changelog
+# + 030315 Add case for more than 9 vlan per virtual adapters
+# + 030315 Display ioslevel on first line
+# + 030315 Sort vlan id (in all cases)
+# + 030315 Changing coloring for backup
 
 # All functions are named f_function.
 # All variables are named v_variable.
@@ -20,6 +25,14 @@
 
 # This script must be run on a Virtual I/O Server only.
 # You have to be root to run the script.
+
+# Function f_sort_a_numbered_line 
+# Purpose : Sort a line
+function f_sort_a_numbered_line {
+  v_line="$1"
+  v_delim="$2"
+  echo ${v_line} | tr "${v_delim}" '\n' | sort -n | tr '\n' "${v_delim}"
+}
 
 # Function f_norm
 # Purpose : Remove trailing and heading space, and \n from a given strings
@@ -151,10 +164,17 @@ function f_veth_adapter_entstat_info {
   set -A v_table_veth_details $(awk '
     /Port VLAN ID:/                       { printf $NF"|" }
     /Switch ID:/                          { v_get_vlan_tag_id=0 ; printf $NF"|" }
+    # For more than 9 vlan vlans are printed on multiple lines
+                                          { if (v_get_vlan_tag_id == 1 ) {
+                                              for (i=0;i<=NF;i++) {
+                                                v_all_vlan_tag_id=v_all_vlan_tag_id" "$i
+                                              }
+                                            }
+                                          }
     # On some systems there is a space before Switch Mode ... if someone can explain
     /Switch Mode/                         { printf $NF"|" }
     /Priority:/                           { printf $2"|"$NF"|" }
-    /VLAN Tag IDs:/                       { v_get_vlan_tag_id=1 ; for (i=2;i<=NF;i++) {
+    /VLAN Tag IDs:/                       { v_first_vlan_line=1 ; v_get_vlan_tag_id=1 ; for (i=2;i<=NF;i++) {
                                                                     if ($i ~ /[0-9][0-9]*/ ) {
                                                                       v_all_vlan_tag_id=v_all_vlan_tag_id" "$i 
                                                                     }
@@ -179,7 +199,7 @@ function f_get_slot_hpath {
 # Main
 # Purpose display information about Shared Ethernet Adapters
 v_color=0
-v_version="0.1a 022815"
+v_version="0.1b 030315"
 
 # Usage: lsseas [ options ] 
 #   -c, --color                 color the output for readability
@@ -202,9 +222,11 @@ while getopts "cvh" optchar ; do
   esac
 done
 
+v_ioscli_bin="/usr/ios/cli/ioscli"
 v_sys_id=$(lsattr -El sys0 -a systemid | awk '{print $2}')
+v_ioslevel=$(${v_ioscli_bin} ioslevel)
 v_hostname=$(hostname)
-echo "running lssea on ${v_hostname} | ${v_sys_id} | ${v_version}"
+echo "running lssea on ${v_hostname} | ${v_sys_id} | ioslevel ${v_ioslevel} | ${v_version}"
 
 # Put a zero here if you do not want colors
 if tty -s ; then
@@ -240,8 +262,6 @@ fi
 #echo "$g ok $n"
 #echo "$y warning $n"
 
-v_ioscli_bin="/usr/ios/cli/ioscli"
-
 # Get all Shared Ethernet Adapters 
 v_seas=$(${v_ioscli_bin} lsdev -virtual -field name description | awk '$2 == "Shared" && $3 == "Ethernet" && $4 == "Adapter" {print $1}')
 
@@ -271,7 +291,8 @@ for v_sea in ${v_seas} ; do
     elif [[ ${v_table_sea_details[4]} == "Auto" ]];then
       case ${v_table_sea_details[1]} in
         "LIMBO") ssc=$r ;;
-        "PRIMARY"|"BACKUP") ssc=$g ;;
+        "PRIMARY") ssc=$g ;;
+        "BACKUP") ssc=$y ;;
         "RECOVERY"|"NOTIFY"|"INIT") scc=$y ;;
         *) scc=$n ;;
       esac
@@ -283,6 +304,7 @@ for v_sea in ${v_seas} ; do
     
   # SEA failover case.
   if [[ ${v_is_not_failover} -eq 0 ]]; then 
+    v_sorted_vlans=$(f_sort_a_numbered_line "${v_table_sea_details[6]}" ' ')
     echo "+------------------------------------------------------+"
     echo "SEA : $b ${v_sea} $n"
     echo "ha_mode              : ${v_table_sea_details[4]}"
@@ -290,7 +312,7 @@ for v_sea in ${v_seas} ; do
     echo "number of adapters   : ${v_table_sea_details[0]}"
     echo "become backup/primary: ${v_table_sea_details[2]}/${v_table_sea_details[3]}"
     echo "priority             : ${v_table_sea_details[5]}"
-    echo "vlans                : ${v_table_sea_details[6]}"
+    echo "vlans                : ${v_sorted_vlans}"
     echo "flags                : ${v_table_sea_details[7]}"
     echo "+------------------------------------------------------+"
   # SEA no failover case.
@@ -365,8 +387,8 @@ for v_sea in ${v_seas} ; do
   v_list_veth_adapter=$(echo "${v_table_sea_attr[2]}" | awk -F ',' '{for (i=1; i<=NF; i++) print $i}')
   # VIRTUAL ADAPTERS type.
   echo "$i VIRTUAL ADAPTERS $n"
-  printf "%-7s %-4s %-30s %-8s %-6s %-13s %-15s %-7s %-50s\n" "adapter" "slot" "hardware_path" "priority" "active" "port_vlan_id" "vswitch" "mode" "vlan_tags_ids"
-  printf "%-7s %-4s %-30s %-8s %-6s %-13s %-15s %-7s %-50s\n" "-------" "----" "-------------" "--------" "------" "------------" "-------" "----" "-------------"
+  printf "%-7s %-4s %-30s %-8s %-6s %-13s %-15s %-7s %-150s\n" "adapter" "slot" "hardware_path" "priority" "active" "port_vlan_id" "vswitch" "mode" "vlan_tags_ids"
+  printf "%-7s %-4s %-30s %-8s %-6s %-13s %-15s %-7s %-150s\n" "-------" "----" "-------------" "--------" "------" "------------" "-------" "----" "-------------"
 
   for v_a_veth in ${v_list_veth_adapter} ; do
     f_veth_adapter_entstat_info ${v_sea} ${v_a_veth}
@@ -376,7 +398,7 @@ for v_sea in ${v_seas} ; do
       "False") ca=$w;;
       "True")  ca=$b;;
     esac
-    printf "%-7s %-4s %-30s %-8s $ca%-6s$n %-13s %-15s %-7s %-50s\n" "${v_a_veth}" $(echo ${t_veth_slot_hpath} | awk '{print $1}')  $(echo ${t_veth_slot_hpath} | awk '{print $2}') $(f_norm ${v_table_veth_details[0]}) $(f_norm ${v_table_veth_details[1]}) $(f_norm ${v_table_veth_details[2]}) $(f_norm ${v_table_veth_details[3]}) $(f_norm ${v_table_veth_details[4]}) $(echo ${v_table_veth_details[5]} | tr -s ' ' ',')
+    printf "%-7s %-4s %-30s %-8s $ca%-6s$n %-13s %-15s %-7s %-150s\n" "${v_a_veth}" $(echo ${t_veth_slot_hpath} | awk '{print $1}')  $(echo ${t_veth_slot_hpath} | awk '{print $2}') $(f_norm ${v_table_veth_details[0]}) $(f_norm ${v_table_veth_details[1]}) $(f_norm ${v_table_veth_details[2]}) $(f_norm ${v_table_veth_details[3]}) $(f_norm ${v_table_veth_details[4]}) $(f_sort_a_numbered_line $(echo ${v_table_veth_details[5]} | tr -s ' ' ','))
   done
   # CONTROL CHANNEL type. 
   v_ctl_chan_exists=$(${v_ioscli_bin} lsdev -dev ${v_sea} -attr ctl_chan} | tail -1 | awk '$1 ~ "^ent" {print "exists"}' )
