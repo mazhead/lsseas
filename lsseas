@@ -18,8 +18,10 @@
 # + 030315 Display ioslevel on first line
 # + 030315 Sort vlan id (in all cases)
 # + 030315 Changing coloring for backup
-# + 040315 Reduced number of chars in VIRTUAL ADAPTERS section
-# + 040315 Dynamically count vlan chars and add to printf command
+# + 030415 Reduced number of chars in VIRTUAL ADAPTERS section
+# + 030415 Dynamically count vlan chars and add to printf command
+# ~ 090315 Modify for duplicate vlan ids
+# + 090315 Adding option -b for buffers, waring if max allocated = max
 
 # All functions are named f_function.
 # All variables are named v_variable.
@@ -33,7 +35,7 @@
 function f_sort_a_numbered_line {
   v_line="$1"
   v_delim="$2"
-  echo ${v_line} | tr "${v_delim}" '\n' | sort -n | tr '\n' "${v_delim}"
+  echo ${v_line} | tr "${v_delim}" '\n' | sort -un | tr '\n' "${v_delim}"
 }
 
 # Function f_norm
@@ -168,7 +170,7 @@ function f_veth_adapter_entstat_info {
     /Switch ID:/                          { v_get_vlan_tag_id=0 ; printf $NF"|" }
     # For more than 9 vlan vlans are printed on multiple lines
                                           { if (v_get_vlan_tag_id == 1 ) {
-                                              for (i=0;i<=NF;i++) {
+                                              for (i=1;i<=NF;i++) {
                                                 v_all_vlan_tag_id=v_all_vlan_tag_id" "$i
                                               }
                                             }
@@ -176,7 +178,7 @@ function f_veth_adapter_entstat_info {
     # On some systems there is a space before Switch Mode ... if someone can explain
     /Switch Mode/                         { printf $NF"|" }
     /Priority:/                           { printf $2"|"$NF"|" }
-    /VLAN Tag IDs:/                       { v_first_vlan_line=1 ; v_get_vlan_tag_id=1 ; for (i=2;i<=NF;i++) {
+    /VLAN Tag IDs:/                       { v_get_vlan_tag_id=1 ; for (i=2;i<=NF;i++) {
                                                                     if ($i ~ /[0-9][0-9]*/ ) {
                                                                       v_all_vlan_tag_id=v_all_vlan_tag_id" "$i 
                                                                     }
@@ -187,6 +189,91 @@ function f_veth_adapter_entstat_info {
   # Replace IFS by OLD_IFS (default one)
   IFS=$OLD_IFS
   return ${v_table_veth_details}
+}
+
+# Function f_veth_buffer_entstat_info 
+# Purpose : extract information from enstat file about buffers
+function f_veth_buffer_entstat_info {
+  v_shared_ethernet_adapter=$1
+  v_veth_adapter=$2
+  v_is_control_adapter=0
+  v_enstat_file=/tmp/enstat.${v_shared_ethernet_adapter}.${v_veth_adapter}
+  if [[ -e "${v_enstat_file}.controladapter" ]]; then
+    v_is_control_adapter=1
+  fi
+  OLD_IFS=$IFS
+  IFS="|"
+  # if this is a control adapter columns 4 is control skip it
+  if [[ ${v_is_control_adapter} -eq 1 ]]; then
+    set -A v_table_veth_buffers $(awk '
+      #No Resource Errors is at the end of the line of Max Collision Errors
+      /Max Collision Errors/        { print $NF"|" }
+      /Hypervisor Send Failures/    { print $NF"|" }
+      /Hypervisor Receive Failures/ { print $NF"|" }
+      /Receive Buffers/             { v_receive_buffers=1 }
+      /Min Buffers/                 {  if (v_receive_buffers == 1 ) {
+                                         v_tiny_buffers=v_tiny_buffers","$3
+                                         v_smal_buffers=v_smal_buffers","$5
+                                         v_medi_buffers=v_medi_buffers","$6
+                                         v_larg_buffers=v_larg_buffers","$7
+                                         v_huge_buffers=v_huge_buffers","$8
+                                      }
+                                    }
+      /Max Buffers/                 {  if (v_receive_buffers == 1 ) {
+                                         v_tiny_buffers=v_tiny_buffers","$3
+                                         v_smal_buffers=v_smal_buffers","$5
+                                         v_medi_buffers=v_medi_buffers","$6
+                                         v_larg_buffers=v_larg_buffers","$7
+                                         v_huge_buffers=v_huge_buffers","$8
+                                      }
+                                    }
+      /Max Allocated/               {  if (v_receive_buffers == 1 ) {
+                                         v_tiny_buffers=v_tiny_buffers","$3
+                                         v_smal_buffers=v_smal_buffers","$5
+                                         v_medi_buffers=v_medi_buffers","$6
+                                         v_larg_buffers=v_larg_buffers","$7
+                                         v_huge_buffers=v_huge_buffers","$8
+                                      }
+                                    }
+      END { printf v_tiny_buffers"|"v_smal_buffers"|"v_medi_buffers"|"v_larg_buffers"|"v_huge_buffers }
+      ' ${v_enstat_file})
+  else
+    set -A v_table_veth_buffers $(awk '
+      #No Resource Errors is at the end of the line of Max Collision Errors
+      /Max Collision Errors/        { print $NF"|" }
+      /Hypervisor Send Failures/    { print $NF"|" }
+      /Hypervisor Receive Failures/ { print $NF"|" }
+      /Receive Buffers/             { v_receive_buffers=1 }
+      /Min Buffers/                 { if (v_receive_buffers == 1 ) {
+                                         v_tiny_buffers=v_tiny_buffers","$3
+                                         v_smal_buffers=v_smal_buffers","$4
+                                         v_medi_buffers=v_medi_buffers","$5
+                                         v_larg_buffers=v_larg_buffers","$6
+                                         v_huge_buffers=v_huge_buffers","$7
+                                      }
+                                    } 
+      /Max Buffers/                 { if (v_receive_buffers == 1 ) {
+                                         v_tiny_buffers=v_tiny_buffers","$3
+                                         v_smal_buffers=v_smal_buffers","$4
+                                         v_medi_buffers=v_medi_buffers","$5
+                                         v_larg_buffers=v_larg_buffers","$6
+                                         v_huge_buffers=v_huge_buffers","$7
+                                      }
+                                    }
+      /Max Allocated/               { if (v_receive_buffers == 1 ) {
+                                         v_tiny_buffers=v_tiny_buffers","$3
+                                         v_smal_buffers=v_smal_buffers","$4
+                                         v_medi_buffers=v_medi_buffers","$5
+                                         v_larg_buffers=v_larg_buffers","$6
+                                         v_huge_buffers=v_huge_buffers","$7
+                                      }
+                                    }
+    END { printf v_tiny_buffers"|"v_smal_buffers"|"v_medi_buffers"|"v_larg_buffers"|"v_huge_buffers }
+    ' ${v_enstat_file})
+  fi
+  # Replace IFS by OLD_IFS (default one)
+  IFS=$OLD_IFS
+  return ${v_table_veth_buffers} 
 }
 
 # Function f_get_slot_hpath
@@ -201,16 +288,19 @@ function f_get_slot_hpath {
 # Main
 # Purpose display information about Shared Ethernet Adapters
 v_color=0
-v_version="0.1b 030315"
+v_buffers=0
+v_version="0.1c 030915"
 
 # Usage: lsseas [ options ] 
+#   -b, --buffers               print buffers details
 #   -c, --color                 color the output for readability
 #   -v, --version               print the version of lsseas
-v_usage_string="Usage: lsseas [ options ]\n  -c,                  color the output for readability\n -h,               print the help\n  -v,               print the version\n"
+v_usage_string="Usage: lsseas [ options ]\n  -b,                   print buffers details\n  -c,                  color the output for readability\n -h,               print the help\n  -v,               print the version\n"
 
 # Get options
-while getopts "cvh" optchar ; do
+while getopts "cvhb" optchar ; do
   case $optchar in
+    b) v_buffers=1;;
     c) v_color=1 ;;
     v) echo ${v_version}
        exit 253 ;;
@@ -401,7 +491,7 @@ for v_sea in ${v_seas} ; do
       "True")  ca=$b;;
     esac
     v_vlan_count=$(echo $(f_sort_a_numbered_line $(echo ${v_table_veth_details[5]} | tr -s ' ' ',')))
-    printf "%-7s %-4s %-30s %-8s $ca%-6s$n %-13s %-15s %-7s %-${#v_vlan_count}s\n" "${v_a_veth}" $(echo ${t_veth_slot_hpath} | awk '{print $1}')  $(echo ${t_veth_slot_hpath} | awk '{print $2}') $(f_norm ${v_table_veth_details[0]}) $(f_norm ${v_table_veth_details[1]}) $(f_norm ${v_table_veth_details[2]}) $(f_norm ${v_table_veth_details[3]}) $(f_norm ${v_table_veth_details[4]}) $(f_sort_a_numbered_line $(echo ${v_table_veth_details[5]} | tr -s ' ' ','))
+    printf "%-7s %-4s %-30s %-8s $ca%-6s$n %-13s %-15s %-7s %-${#v_vlan_count}s\n" "${v_a_veth}" $(echo ${t_veth_slot_hpath} | awk '{print $1}')  $(echo ${t_veth_slot_hpath} | awk '{print $2}') $(f_norm ${v_table_veth_details[0]}) $(f_norm ${v_table_veth_details[1]}) $(f_norm ${v_table_veth_details[2]}) $(f_norm ${v_table_veth_details[3]}) $(f_norm ${v_table_veth_details[4]}) $(f_sort_a_numbered_line $(echo ${v_table_veth_details[5]} | tr -s ' ' ',') ' ' )
   done
   # CONTROL CHANNEL type. 
   v_ctl_chan_exists=$(${v_ioscli_bin} lsdev -dev ${v_sea} -attr ctl_chan} | tail -1 | awk '$1 ~ "^ent" {print "exists"}' )
@@ -419,5 +509,41 @@ for v_sea in ${v_seas} ; do
     printf "%-7s %-4s %-30s %-13s %-15s\n" "adapter" "slot" "hardware_path" "port_vlan_id" "vswitch"
     printf "%-7s %-4s %-30s %-13s %-15s\n" "-------" "----" "-------------" "------------" "-------"
     printf "%-7s %-4s %-30s %-13s %-15s\n" ${v_table_sea_attr[4]} $(echo ${t_ctl_slot_hpath} | awk '{print $1}') $(echo ${t_ctl_slot_hpath} | awk '{print $2}') $(f_norm ${v_table_veth_details[0]}) $(f_norm ${v_table_veth_details[1]})
+  fi
+  if [[ ${v_buffers} -eq 1 ]]; then
+    v_list_buff_adapter=$(echo "${v_table_sea_attr[2]}" | awk -F ',' '{for (i=1; i<=NF; i++) print $i}')
+    echo "$i BUFFERS $n"
+    printf "%-7s %-4s %-30s %-19s %-17s %-17s %-60s\n" "adapter" "slot" "hardware_path" "no_resources_errors" "hyp_recv_failures" "hyp_send_failures" "tiny,small,medium,large,huge (min,max,alloc)"
+    printf "%-7s %-4s %-30s %-19s %-17s %-17s %-60s\n" "-------" "----" "-------------" "-------------------" "-----------------" "-----------------" "--------------------------------------------"
+    for v_a_buff in ${v_list_buff_adapter} ; do
+      f_veth_buffer_entstat_info ${v_sea} ${v_a_buff}
+      b_veth_slot_hpath=$(f_get_slot_hpath ${v_a_buff})
+      v_smal=$(f_norm ${v_table_veth_buffers[3]} | sed "s/^.\(.*\)/\1/" )
+      v_tiny=$(f_norm ${v_table_veth_buffers[4]} | sed "s/^.\(.*\)/\1/" )
+      v_medi=$(f_norm ${v_table_veth_buffers[5]} | sed "s/^.\(.*\)/\1/" )
+      v_larg=$(f_norm ${v_table_veth_buffers[6]} | sed "s/^.\(.*\)/\1/" )
+      v_huge=$(f_norm ${v_table_veth_buffers[7]} | sed "s/^.\(.*\)/\1/" )
+      v_smal_min=$(echo ${v_smal} | cut -d ',' -f 1)
+      v_smal_max=$(echo ${v_smal} | cut -d ',' -f 2)
+      v_smal_alo=$(echo ${v_smal} | cut -d ',' -f 3)
+      v_tiny_min=$(echo ${v_tiny} | cut -d ',' -f 1)
+      v_tiny_max=$(echo ${v_tiny} | cut -d ',' -f 2)
+      v_tiny_alo=$(echo ${v_tiny} | cut -d ',' -f 3)
+      v_medi_min=$(echo ${v_medi} | cut -d ',' -f 1)
+      v_medi_max=$(echo ${v_medi} | cut -d ',' -f 2)
+      v_medi_alo=$(echo ${v_medi} | cut -d ',' -f 3)
+      v_larg_min=$(echo ${v_larg} | cut -d ',' -f 1)
+      v_larg_max=$(echo ${v_larg} | cut -d ',' -f 2)
+      v_larg_alo=$(echo ${v_larg} | cut -d ',' -f 3)
+      v_huge_min=$(echo ${v_larg} | cut -d ',' -f 1)
+      v_huge_max=$(echo ${v_larg} | cut -d ',' -f 2)
+      v_huge_alo=$(echo ${v_larg} | cut -d ',' -f 3)
+      if [[ "${v_smal_max}" == "${v_smal_alo}" ]] ; then v_p_smal="${v_smal_min},$r${v_smal_max}$n,$y${v_smal_alo}$n" ; else v_p_smal="${v_smal_min},$g${v_smal_max}$n,$g${v_smal_alo}$n" ; fi
+      if [[ "${v_tiny_max}" == "${v_tiny_alo}" ]] ; then v_p_tiny="${v_tiny_min},$r${v_tiny_max}$n,$y${v_tiny_alo}$n" ; else v_p_tiny="${v_tiny_min},$g${v_tiny_max}$n,$g${v_tiny_alo}$n" ; fi
+      if [[ "${v_medi_max}" == "${v_medi_alo}" ]] ; then v_p_medi="${v_medi_min},$r${v_medi_max}$n,$y${v_medi_alo}$n" ; else v_p_medi="${v_medi_min},$g${v_medi_max}$n,$g${v_medi_alo}$n" ; fi
+      if [[ "${v_larg_max}" == "${v_larg_alo}" ]] ; then v_p_larg="${v_larg_min},$r${v_larg_max}$n,$y${v_larg_alo}$n" ; else v_p_larg="${v_larg_min},$g${v_larg_max}$n,$g${v_larg_alo}$n" ; fi
+      if [[ "${v_huge_max}" == "${v_huge_alo}" ]] ; then v_p_huge="${v_huge_min},$r${v_huge_max}$n,$y${v_huge_alo}$n" ; else v_p_huge="${v_huge_min},$g${v_huge_max}$n,$g${v_huge_alo}$n" ; fi
+      printf "%-7s %-4s %-30s %-19s %-17s %-17s %-${#v_p_smal}s %-${#v_p_tiny}s %-${#v_p_medi}s %-${#v_p_larg}s %-${#v_p_huge}s\n" "${v_a_buff}" $(echo ${b_veth_slot_hpath} | awk '{print $1}')  $(echo ${b_veth_slot_hpath} | awk '{print $2}') $(f_norm ${v_table_veth_buffers[0]}) $(f_norm ${v_table_veth_buffers[1]}) $(f_norm ${v_table_veth_buffers[2]}) "${v_p_smal}" "${v_p_tiny}" "${v_p_medi}" "${v_p_larg}" "${v_p_huge}"
+    done
   fi
 done
