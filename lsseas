@@ -409,10 +409,12 @@ for v_sea in ${v_seas} ; do
     echo "+------------------------------------------------------+"
   # SEA no failover case.
   elif [[ ${v_is_not_failover} -eq 1 ]]; then
+    v_sorted_vlans=$(f_sort_a_numbered_line "${v_table_sea_details[6]}" ' ')
     echo "+------------------------------------------------------+"
     echo "SEA : $b ${v_sea} $n"
     echo "number of adapters   : ${v_table_sea_details[0]}"
-    echo "vlans                : ${v_table_sea_details[1]}"
+    echo "state                : ${v_table_sea_details[1]}"
+    echo "vlans                : ${v_sorted_vlans}"
     echo "flags                : ${v_table_sea_details[2]}"
     echo "+------------------------------------------------------+"
   fi
